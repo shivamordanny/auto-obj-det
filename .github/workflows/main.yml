@@ -34,5 +34,5 @@ jobs:
         run: |
           echo Add other actions to build,
           echo test, and deploy your project.
-          python main.py
+          python main.py --image Aframe_000018.png
   
