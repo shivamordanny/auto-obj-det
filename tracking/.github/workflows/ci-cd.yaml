@@ -1,0 +1,305 @@
+
+
+## DVC Initialization
+
+name: classification-testing-pipeline
+on: [push]
+jobs:
+  run:
+    runs-on: [ubuntu-latest]
+    container: docker://dvcorg/cml-py3:latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: 'Train my model'
+        env:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Your ML workflow goes here
+          pip install -r requirements.txt
+          dvc repro
+          
+          git fetch --prune
+          
+          dvc metrics diff --show-md master > report.md
+          
+          # Add a figure into report
+          echo "## ROC Graph for the model"
+          cml-publish ROC.png --md >> report.md
+          
+          cml-send-comment report.md
+
+
+## DVC 
+
+name: dvc-action
+
+on: [push, pull_request]
+
+jobs:
+  run:
+    # if: "!contains(github.event.commits[0].message, '[ci skip]')"
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v1
+
+      - name: setup python 
+        uses: actions/setup-python@v1
+        with:
+          python-version: 3.6
+
+      - name: setup data case
+        run: |
+          pip install dvc
+          
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          dvc init --force
+          dvc install
+          mkdir data
+          for i in {1..10}
+          do
+            echo creating file ./data/sample$i
+            echo "sample$i" >> ./data/sample$i
+          done
+          dvc add data
+          git add .gitignore data.dvc
+          git commit -m "v1"
+          for i in {11..25}
+          do
+            echo creating file ./data/sample$i
+            echo "sample$i" >> ./data/sample$i
+          done
+          rm data/sample1
+          rm data/sample2
+          echo modified >> data/sample3
+          dvc commit -f -q
+          git add data.dvc
+          git commit -m "v2"
+      - uses: ./
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          dvc_repro_file: 'None'
+        env:
+          STUB: true
+
+
+## Deployment using ssh
+
+name: remote ssh command
+on: [push]
+jobs:
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+    - name: checkout
+      uses: actions/checkout@v1
+
+    - name: executing remote ssh commands using password
+      uses: ./
+      with:
+        host: ${{ secrets.HOST }}
+        username: ${{ secrets.USERNAME }}
+        password: ${{ secrets.PASSWORD }}
+        port: ${{ secrets.PORT }}
+        script: whoami
+
+    - name: executing remote ssh commands using ssh key
+      uses: ./
+      with:
+        host: ${{ secrets.HOST }}
+        username: ${{ secrets.USERNAME }}
+        key: ${{ secrets.KEY }}
+        port: ${{ secrets.PORT }}
+        script: whoami
+
+    - name: multiple command
+      uses: ./
+      with:
+        host: ${{ secrets.HOST }}
+        username: ${{ secrets.USERNAME }}
+        key: ${{ secrets.KEY }}
+        port: ${{ secrets.PORT }}
+        script: |
+          whoami
+          ls -al
+    # - name: stop script if command error
+    #   uses: ./
+    #   with:
+    #     host: ${{ secrets.HOST }}
+    #     username: ${{ secrets.USERNAME }}
+    #     key: ${{ secrets.KEY }}
+    #     port: ${{ secrets.PORT }}
+    #     script_stop: true
+    #     script: |
+    #       mkdir abc/def
+    #       ls -al
+
+    - name: pass environment
+      uses: ./
+      env:
+        FOO: "BAR"
+      with:
+        host: ${{ secrets.HOST }}
+        username: ${{ secrets.USERNAME }}
+        key: ${{ secrets.KEY }}
+        port: ${{ secrets.PORT }}
+        envs: FOO
+        script: |
+          echo "I am $FOO, thanks"
+          echo "I am $BAR, thanks"
+    - name: pass multiple environment
+      uses: ./
+      env:
+        FOO: "BAR"
+        BAR: "FOO"
+        SHA: ${{ github.sha }}
+      with:
+        host: ${{ secrets.HOST }}
+        username: ${{ secrets.USERNAME }}
+        key: ${{ secrets.KEY }}
+        port: ${{ secrets.PORT }}
+        envs: FOO,BAR,SHA
+        script: |
+          echo "I am $FOO, thanks"
+          echo "I am $BAR, thanks"
+          echo "sha: $SHA"
+    - name: ssh key passphrase
+      uses: ./
+      with:
+        host: ${{ secrets.HOST }}
+        username: ${{ secrets.USERNAME }}
+        key: ${{ secrets.SSH2 }}
+        port: ${{ secrets.PORT }}
+        passphrase: ${{ secrets.PASSPHRASE }}
+        script: |
+          whoami
+          ls -al
+    - name: use insecure cipher
+      uses: ./
+      with:
+        host: ${{ secrets.HOST }}
+        username: ${{ secrets.USERNAME }}
+        password: ${{ secrets.PASSWORD }}
+        port: ${{ secrets.PORT }}
+        script: |
+            ls \
+              -lah
+        use_insecure_cipher: true
+
+    # https://github.com/appleboy/ssh-action/issues/75#issuecomment-668314271
+    - name: Multiline SSH commands interpreted as single lines
+      uses: ./
+      with:
+        host: ${{ secrets.HOST }}
+        username: ${{ secrets.USERNAME }}
+        password: ${{ secrets.PASSWORD }}
+        port: ${{ secrets.PORT }}
+        script_stop: true
+        script: |
+            ls \
+              -lah
+        use_insecure_cipher: true
+
+    # https://github.com/appleboy/ssh-action/issues/85
+    - name: Deployment to multiple hosts with different ports
+      uses: ./
+      with:
+        host: "${{ secrets.HOST }}:${{ secrets.PORT }}"
+        username: ${{ secrets.USERNAME }}
+        password: ${{ secrets.PASSWORD }}
+        port: 1024
+        script_stop: true
+        script: |
+            ls \
+              -lah
+        use_insecure_cipher: true
+
+    - name: SSH ED25519 Private Key
+      uses: ./
+      with:
+        host: ${{ secrets.TUNNEL_HOST }}
+        username: ${{ secrets.TUNNEL_USERNAME }}
+        key: ${{ secrets.ID_ED25519 }}
+        port: ${{ secrets.TUNNEL_PORT }}
+        script: whoami
+
+# Teams Notication
+
+name: Check notification
+
+on:
+  push: {}
+  release: {}
+
+jobs:
+  success:
+    name: One with everything
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@master
+      - name: Microsoft Teams Notification
+        uses: skitionek/notify-microsoft-teams@master
+        if: always()
+        with:
+          webhook_url: ${{ secrets.MSTEAMS_WEBHOOK }}
+          needs: ${{ toJson(needs) }}
+          job: ${{ toJson(job) }}
+          steps: ${{ toJson(steps) }}
+          dry_run: True
+
+
+  without_optional_params:
+    name: One with little info
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@master
+      - name: Microsoft Teams Notification
+        uses: skitionek/notify-microsoft-teams@master
+        if: always()
+        with:
+          webhook_url: ${{ secrets.MSTEAMS_WEBHOOK }}
+
+  with_overwrite:
+    name: One with overwrite
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@master
+      - name: Microsoft Teams Notification
+        uses: skitionek/notify-microsoft-teams@master
+        if: always()
+        with:
+          webhook_url: ${{ secrets.MSTEAMS_WEBHOOK }}
+          overwrite: "{title: `Overwrote title in ${workflow_link}`}"
+
+  with_raw:
+    name: One with raw data
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@master
+      - name: Microsoft Teams Notification
+        uses: skitionek/notify-microsoft-teams@master
+        if: always()
+        with:
+          webhook_url: ${{ secrets.MSTEAMS_WEBHOOK }}
+          raw: >-
+            {
+              "@type": "MessageCard",
+              "@context": "http://schema.org/extensions",
+              "title": "No ${variables} avaliable in here"
+            }
+
+  if_failure:
+    name: Only if failure
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@master
+      - name: Microsoft Teams Notification
+        uses: skitionek/notify-microsoft-teams@master
+        if: failure()
+        with:
+          webhook_url: ${{ secrets.MSTEAMS_WEBHOOK }}
+
